@@ -1,0 +1,172 @@
+module Test where
+
+import Daml.Script
+import Main
+import DA.Optional (fromSome)
+
+{-- Min 1 Full Scenario & Min 3 Happy Path
+1. testCustomerSubmit: 
+customer can submit information to register for the application
+2. testShopReview:
+shop can review the customer's information and decide whether to create an account 
+3. testCustomerAddMoney:
+customer can add cash to the account
+4. testCustomerPurchaseProduct:
+customer can buys items by reducing the cash in his/her account
+5. testCustomerGetItemsName
+customer can gets the purchased product in the form of text
+--}
+
+{--  Min 3 Unhappy Paths
+1.cantReviewBycustomer:
+customers cannot have the right to review
+2.cantHaveEmptyUserId:
+customer's `id` cannot be an empty string after account created
+3.cantBuyItemsWithoutMoney:
+customers cannot buy things if they don't have money
+--}
+
+
+data TestData = TestData with
+  alice: Party
+  shop: Party
+  bob: Party
+  id: Text
+  name: Text
+    deriving (Show)
+
+
+setupTestData: Script TestData
+setupTestData = do
+  alice <- allocateParty "Alice"
+  shop <- allocateParty "Skyler Shop"
+  bob <- allocateParty "Bob"
+  return $ TestData
+    with
+      alice = alice
+      shop = shop
+      bob = bob
+      id = ""
+      name = ""
+
+testCustomerSubmit : Script (TestData, ContractId ShopApplication)
+testCustomerSubmit = script do
+  testData <- setupTestData
+  aliceShopAppId <- submit testData.alice do
+    createCmd ShopApplication with  
+      customer = testData.alice 
+      shop = testData.shop
+      id = testData.id
+      name = testData.name
+
+  aliceShopAppId <- submit testData.alice do 
+    exerciseCmd aliceShopAppId SubmitInfo with
+      appCustomer = testData.alice
+      appShop = testData.shop
+      customerId = "12345"
+      customerName = "Alice" 
+  return (testData, aliceShopAppId)
+
+
+testShopReview : Script (TestData, Optional (ContractId Account))
+testShopReview = script do
+  (testData@TestData{..}, aliceShopAppId) <- testCustomerSubmit
+  aliceAccountId <- submit testData.shop do 
+    exerciseCmd aliceShopAppId ReviewInfo 
+  return (testData, aliceAccountId)
+
+
+testCustomerAddMoney : Script (TestData, ContractId Account)
+testCustomerAddMoney = script do
+  (testData@TestData{..}, aliceAccountId) <- testShopReview
+  aliceAccountId <- submit testData.alice do
+    exerciseCmd (fromSome aliceAccountId) AddMoney 
+      with
+        newMoney = 100.0
+  return (testData, aliceAccountId)
+
+    
+testCustomerPurchaseProduct : Script (TestData, ContractId Account)
+testCustomerPurchaseProduct = script do
+  (testData@TestData{..}, aliceAccountId) <- testCustomerAddMoney
+  aliceAccountId <- submit testData.alice do
+    exerciseCmd aliceAccountId PurchaseProduct
+      with
+        amount = 70.0
+        products = ["Teddy Bear", "Cabbage"]
+  return (testData, aliceAccountId)
+
+
+testCustomerGetItemsName : Script ()
+testCustomerGetItemsName = script do
+  (testData@TestData{..}, aliceAccountId) <- testCustomerPurchaseProduct
+  submit alice do
+    exerciseCmd aliceAccountId GetAllProductNameById
+      with id = aliceAccountId
+
+  
+
+cantReviewBycustomer : Script ()
+cantReviewBycustomer = script do
+  (testData@TestData{..}, aliceShopAppId) <- testCustomerSubmit
+  submitMustFail testData.alice do 
+    exerciseCmd aliceShopAppId ReviewInfo 
+  return ()
+
+
+cantHaveEmptyUserId : Script ()
+cantHaveEmptyUserId = script do  
+  testData <- setupTestData
+
+  bobShopAppId <- submit testData.bob do
+    createCmd ShopApplication with  
+      customer = testData.bob
+      shop = testData.shop
+      id = testData.id
+      name = testData.name
+
+  bobShopAppId <- submit testData.bob do 
+    exerciseCmd bobShopAppId SubmitInfo with
+      appCustomer = testData.bob
+      appShop = testData.shop
+      customerId = ""
+      customerName = "Bob"
+
+  submitMustFail testData.shop do 
+    exerciseCmd bobShopAppId ReviewInfo  
+  return ()
+
+
+cantBuyItemsWithoutMoney : Script ()
+cantBuyItemsWithoutMoney = script do  
+  testData <- setupTestData
+
+  bobShopAppId <- submit testData.bob do
+    createCmd ShopApplication with  
+      customer = testData.bob
+      shop = testData.shop
+      id = testData.id
+      name = testData.name
+
+  bobShopAppId <- submit testData.bob do 
+    exerciseCmd bobShopAppId SubmitInfo with
+      appCustomer = testData.bob
+      appShop = testData.shop
+      customerId = "23456"
+      customerName = "Bob"
+
+  bobAccountId <- submit testData.shop do
+    exerciseCmd bobShopAppId ReviewInfo
+
+  let cId = fromSome bobAccountId
+
+  submitMustFail testData.bob do
+    exerciseCmd cId PurchaseProduct
+      with
+        amount = 70.0
+        products = ["Teddy bear", "cabbage"]
+
+  return ()
+  
+
+

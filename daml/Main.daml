@@ -1,0 +1,101 @@
+module Main where
+
+import DA.Optional (isSome)
+
+
+template ShopApplication
+  with 
+      customer: Party
+      shop: Party
+
+      id: Text
+      name: Text
+
+  where
+    signatory customer
+    observer shop
+
+    -- The customer submits information to register for the application
+    choice SubmitInfo: ContractId ShopApplication
+      with appCustomer: Party
+           appShop: Party
+           customerId: Text
+           customerName: Text
+      controller customer
+      do create ShopApplication
+           with customer = appCustomer
+                shop = appShop
+                id = customerId
+                name = customerName
+
+    -- Shop review information, 
+    -- if the account exists, the account is not created, 
+    -- otherwise, the account is created for the customer          
+    choice ReviewInfo: Optional (ContractId Account)
+      controller shop 
+        do 
+            account <- lookupByKey @Account (customer, id)
+            if (isSome account) then 
+               trace "Can not create an account twice" (return None)
+            else do
+                accountCid <- create Account with                                                            
+                                money = 0.0
+                                productsList = []
+                                ..
+                return (Some accountCid)
+                
+ 
+template Account
+  with
+    customer: Party
+    shop: Party
+
+    id: Text
+    name: Text
+    money: Decimal
+    productsList: [Text]
+
+
+  where
+    signatory customer
+    observer shop
+
+    key (customer, id): (Party, Text)
+    maintainer key._1
+
+    -- `id` can not be an empty string after account created
+    -- `money` must be greater than or equal to 0.0
+    ensure id /= "" && money >= 0.0
+
+    -- The customer adds cash to the account
+    choice AddMoney: ContractId Account
+      with newMoney: Decimal
+      controller customer
+      do create Account
+           with
+             money = newMoney + money
+             ..
+
+    -- The customer buys items, `products` is a list containing buying items
+    choice PurchaseProduct: ContractId Account
+      with amount: Decimal
+           products: [Text]
+      controller customer
+      do
+        create Account with
+          money = money - amount
+          productsList = products ++ productsList
+          ..
+
+    -- The customer gets the purchased product in the form of text by 
+    -- ContractId of type Acccount
+    nonconsuming choice GetAllProductNameById: ()
+      with id: ContractId Account
+      controller customer
+      do
+        accountData <- fetch @Account id
+        let productsList = accountData.productsList
+        debug $ "Your purchase history: " 
+          <> (foldl (\x acc -> acc <> "/ " <> x) "" productsList)
+    
+

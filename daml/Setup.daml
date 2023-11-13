@@ -1,0 +1,29 @@
+module Setup where
+
+import Daml.Script
+import Main
+
+testSetup : Script ()
+testSetup = do
+  -- 1. Create two parties named shop and customer
+  shop <- allocatePartyWithHint "shop" (PartyIdHint "SS")
+  alice <- allocatePartyWithHint "customer" (PartyIdHint "CU")
+
+  -- 2. Create two user-ids with display-names as "Skyler Shop" and "Alice"
+  shopId <- validateUserId "SkylerShop"
+  aliceld <- validateUserId "Alice"
+
+  -- 3. Create two users using the two user-ids created above. 
+  -- Map Skyler Shop and Alice to 'shop' and 'alice' respectively with role CanActAs.
+  createUser (User shopId (Some shop)) [CanActAs shop]
+  createUser (User aliceld (Some alice)) [CanActAs alice]
+
+  -- Write a submit statement to submit a transaction as alice
+  submit alice do
+    createCmd ShopApplication with  
+      customer = alice 
+      shop = shop
+      id = ""
+      name = ""
+
+  return ()
